@@ -56,7 +56,7 @@ float NeGcon::GetBindState(u32 index) const
   if (index == (static_cast<u32>(Button::Count) + static_cast<u32>(HalfAxis::SteeringLeft)) ||
       index == (static_cast<u32>(Button::Count) + static_cast<u32>(HalfAxis::SteeringRight)))
   {
-    return static_cast<float>(m_half_axis_state[index - static_cast<u32>(Button::Count)]) * (1.0f / 255.0f);
+    return m_half_axis_state[index - static_cast<u32>(Button::Count)];
   }
   else if (index >= static_cast<u32>(Button::Count))
   {
@@ -74,23 +74,28 @@ float NeGcon::GetBindState(u32 index) const
   }
 }
 
+static float apply_axis_modifier(float value, const NeGcon::AxisModifier& axis_modifier)
+{
+  value = (value - axis_modifier.deadzone) / (axis_modifier.saturation - axis_modifier.deadzone);
+  value = std::clamp(value, 0.0f, 1.0f);
+  value = std::pow(value, std::exp(axis_modifier.linearity));
+  return value;
+}
+
 void NeGcon::SetBindState(u32 index, float value)
 {
   // Steering Axis: -1..1 -> 0..255
   if (index == (static_cast<u32>(Button::Count) + static_cast<u32>(HalfAxis::SteeringLeft)) ||
       index == (static_cast<u32>(Button::Count) + static_cast<u32>(HalfAxis::SteeringRight)))
   {
-    value *= m_steering_sensitivity;
-    if (value < m_steering_deadzone)
-      value = 0.0f;
+    value = apply_axis_modifier(value, m_steering_modifier);
 
-    m_half_axis_state[index - static_cast<u32>(Button::Count)] =
-      static_cast<u8>(std::clamp(value * 255.0f, 0.0f, 255.0f));
+    m_half_axis_state[index - static_cast<u32>(Button::Count)] = std::clamp(value, 0.0f, 1.0f);
 
-    // Merge left/right. Seems to be inverted.
-    m_axis_state[static_cast<u32>(Axis::Steering)] =
-      ((m_half_axis_state[1] != 0) ? (127u + ((m_half_axis_state[1] + 1u) / 2u)) :
-                                     (127u - (m_half_axis_state[0] / 2u)));
+    float merged = m_half_axis_state[1] - m_half_axis_state[0];
+    merged = 255.f * (merged + 1.0f) / 2.0f;
+    merged = std::clamp(merged, 0.0f, 255.0f);
+    m_axis_state[static_cast<u32>(Axis::Steering)] = static_cast<u8>(merged + 0.5f);
   }
   else if (index >= static_cast<u32>(Button::Count))
   {
@@ -98,6 +103,14 @@ void NeGcon::SetBindState(u32 index, float value)
     const u32 sub_index = index - (static_cast<u32>(Button::Count) + 1);
     if (sub_index >= m_axis_state.size())
       return;
+
+    if (index >= (static_cast<u32>(Button::Count) + static_cast<u32>(HalfAxis::I)) &&
+        index <= (static_cast<u32>(Button::Count) + static_cast<u32>(HalfAxis::L)))
+    {
+      const AxisModifier& axis_modifier =
+        m_half_axis_modifiers[index - (static_cast<u32>(Button::Count) + static_cast<u32>(HalfAxis::I))];
+      value = apply_axis_modifier(value, axis_modifier);
+    }
 
     m_axis_state[sub_index] = static_cast<u8>(std::clamp(value * 255.0f, 0.0f, 255.0f));
   }
@@ -264,11 +277,41 @@ static const Controller::ControllerBindingInfo s_binding_info[] = {
 
 static const SettingInfo s_settings[] = {
   {SettingInfo::Type::Float, "SteeringDeadzone", TRANSLATE_NOOP("NeGcon", "Steering Axis Deadzone"),
-   TRANSLATE_NOOP("NeGcon", "Sets deadzone size for steering axis."), "0.00f", "0.00f", "0.99f", "0.01f", "%.0f%%",
+   TRANSLATE_NOOP("NeGcon", "Sets deadzone for steering axis."), "0.00f", "0.00f", "0.99f", "0.01f", "%.0f%%",
    nullptr, 100.0f},
-  {SettingInfo::Type::Float, "SteeringSensitivity", TRANSLATE_NOOP("NeGcon", "Steering Axis Sensitivity"),
-   TRANSLATE_NOOP("NeGcon", "Sets the steering axis scaling factor."), "1.00f", "0.01f", "2.00f", "0.01f", "%.0f%%",
+  {SettingInfo::Type::Float, "SteeringSaturation", TRANSLATE_NOOP("NeGcon", "Steering Axis Saturation"),
+   TRANSLATE_NOOP("NeGcon", "Sets saturation for steering axis."), "1.00f", "0.01f", "1.00f", "0.01f", "%.0f%%",
    nullptr, 100.0f},
+  {SettingInfo::Type::Float, "SteeringLinearity", TRANSLATE_NOOP("NeGcon", "Steering Axis Linearity"),
+   TRANSLATE_NOOP("NeGcon", "Sets linearity for steering axis."), "0.00f", "-2.00f", "2.00f", "0.05f", "%.2f",
+   nullptr, 1.0f},
+  {SettingInfo::Type::Float, "IDeadzone", TRANSLATE_NOOP("NeGcon", "I Button Deadzone"),
+   TRANSLATE_NOOP("NeGcon", "Sets deadzone for button I."), "0.00f", "0.00f", "0.99f", "0.01f", "%.0f%%",
+   nullptr, 100.0f},
+  {SettingInfo::Type::Float, "ISaturation", TRANSLATE_NOOP("NeGcon", "I Button Saturation"),
+   TRANSLATE_NOOP("NeGcon", "Sets saturation for button I."), "1.00f", "0.01f", "1.00f", "0.01f", "%.0f%%",
+   nullptr, 100.0f},
+  {SettingInfo::Type::Float, "ILinearity", TRANSLATE_NOOP("NeGcon", "I Button Linearity"),
+   TRANSLATE_NOOP("NeGcon", "Sets linearity for button I."), "0.00f", "-2.00f", "2.00f", "0.01f", "%.2f",
+   nullptr, 1.0f},
+  {SettingInfo::Type::Float, "IIDeadzone", TRANSLATE_NOOP("NeGcon", "II Button Deadzone"),
+   TRANSLATE_NOOP("NeGcon", "Sets deadzone for button II."), "0.00f", "0.00f", "0.99f", "0.01f", "%.0f%%",
+   nullptr, 100.0f},
+  {SettingInfo::Type::Float, "IISaturation", TRANSLATE_NOOP("NeGcon", "II Button Saturation"),
+   TRANSLATE_NOOP("NeGcon", "Sets saturation for button II."), "1.00f", "0.01f", "1.00f", "0.01f", "%.0f%%",
+   nullptr, 100.0f},
+  {SettingInfo::Type::Float, "IILinearity", TRANSLATE_NOOP("NeGcon", "II Button Linearity"),
+   TRANSLATE_NOOP("NeGcon", "Sets linearity for button II."), "0.00f", "-2.00f", "2.00f", "0.01f", "%.2f",
+   nullptr, 1.0f},
+  {SettingInfo::Type::Float, "LDeadzone", TRANSLATE_NOOP("NeGcon", "Left Trigger Deadzone"),
+   TRANSLATE_NOOP("NeGcon", "Sets deadzone for left trigger."), "0.00f", "0.00f", "0.99f", "0.01f", "%.0f%%",
+   nullptr, 100.0f},
+  {SettingInfo::Type::Float, "LSaturation", TRANSLATE_NOOP("NeGcon", "Left Trigger Saturation"),
+   TRANSLATE_NOOP("NeGcon", "Sets saturation for left trigger."), "1.00f", "0.01f", "1.00f", "0.01f", "%.0f%%",
+   nullptr, 100.0f},
+  {SettingInfo::Type::Float, "LLinearity", TRANSLATE_NOOP("NeGcon", "Left Trigger Linearity"),
+   TRANSLATE_NOOP("NeGcon", "Sets linearity for left trigger."), "0.00f", "-2.00f", "2.00f", "0.01f", "%.2f",
+   nullptr, 1.0f},
 };
 
 const Controller::ControllerInfo NeGcon::INFO = {
@@ -278,6 +321,24 @@ const Controller::ControllerInfo NeGcon::INFO = {
 void NeGcon::LoadSettings(SettingsInterface& si, const char* section)
 {
   Controller::LoadSettings(si, section);
-  m_steering_deadzone = si.GetFloatValue(section, "SteeringDeadzone", 0.10f);
-  m_steering_sensitivity = si.GetFloatValue(section, "SteeringSensitivity", 1.00f);
+  m_steering_modifier = {
+    .deadzone = si.GetFloatValue(section, "SteeringDeadzone", DEFAULTAXISMODIFIER.deadzone),
+    .saturation = si.GetFloatValue(section, "SteeringSaturation", DEFAULTAXISMODIFIER.saturation),
+    .linearity = si.GetFloatValue(section, "SteeringLinearity", DEFAULTAXISMODIFIER.linearity),
+  };
+  m_half_axis_modifiers[0] = {
+    .deadzone = si.GetFloatValue(section, "IDeadzone", DEFAULTAXISMODIFIER.deadzone),
+    .saturation = si.GetFloatValue(section, "ISaturation", DEFAULTAXISMODIFIER.saturation),
+    .linearity = si.GetFloatValue(section, "ILinearity", DEFAULTAXISMODIFIER.linearity),
+  };
+  m_half_axis_modifiers[1] = {
+    .deadzone = si.GetFloatValue(section, "IIDeadzone", DEFAULTAXISMODIFIER.deadzone),
+    .saturation = si.GetFloatValue(section, "IISaturation", DEFAULTAXISMODIFIER.saturation),
+    .linearity = si.GetFloatValue(section, "IILinearity", DEFAULTAXISMODIFIER.linearity),
+  };
+  m_half_axis_modifiers[2] = {
+    .deadzone = si.GetFloatValue(section, "LDeadzone", DEFAULTAXISMODIFIER.deadzone),
+    .saturation = si.GetFloatValue(section, "LSaturation", DEFAULTAXISMODIFIER.saturation),
+    .linearity = si.GetFloatValue(section, "LLinearity", DEFAULTAXISMODIFIER.linearity),
+  };
 }

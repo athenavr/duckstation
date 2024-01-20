@@ -43,6 +43,19 @@ public:
     Count
   };
 
+  struct AxisModifier
+  {
+    float deadzone;
+    float saturation;
+    float linearity;
+  };
+
+  static constexpr AxisModifier DEFAULTAXISMODIFIER = {
+    .deadzone = 0.00f,
+    .saturation = 1.00f,
+    .linearity = 0.00f,
+  };
+
   static const Controller::ControllerInfo INFO;
 
   NeGcon(u32 index);
@@ -83,13 +96,17 @@ private:
   std::array<u8, static_cast<u8>(Axis::Count)> m_axis_state{};
 
   // steering, merged to m_axis_state
-  std::array<u8, 2> m_half_axis_state{};
+  std::array<float, 2> m_half_axis_state;
 
   // buttons are active low; bits 0-2, 8-10, 14-15 are not used and are always high
   u16 m_button_state = UINT16_C(0xFFFF);
 
   TransferState m_transfer_state = TransferState::Idle;
 
-  float m_steering_deadzone = 0.00f;
-  float m_steering_sensitivity = 1.00f;
+  AxisModifier m_steering_modifier = DEFAULTAXISMODIFIER;
+  std::array<AxisModifier, 3> m_half_axis_modifiers = {
+    DEFAULTAXISMODIFIER,
+    DEFAULTAXISMODIFIER,
+    DEFAULTAXISMODIFIER,
+  };
 };
