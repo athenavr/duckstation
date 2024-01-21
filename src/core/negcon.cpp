@@ -93,7 +93,7 @@ void NeGcon::SetBindState(u32 index, float value)
     m_half_axis_state[index - static_cast<u32>(Button::Count)] = std::clamp(value, 0.0f, 1.0f);
 
     float merged = m_half_axis_state[1] - m_half_axis_state[0];
-    merged = 128.0f * merged + 128.0f;
+    merged = 127.0f * merged + 128.0f;
     merged = std::clamp(merged, 0.0f, 255.0f);
     m_axis_state[static_cast<u32>(Axis::Steering)] = merged;
   }
