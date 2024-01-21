@@ -795,7 +795,7 @@ bool SDLInputSource::CloseDevice(int joystick_index)
 
 static float NormalizeS16(s16 value)
 {
-  return static_cast<float>(value) / (value < 0 ? 32768.0f : 32767.0f);
+  return std::clamp(value / 32767.0f, -1.0f, 1.0f);
 }
 
 bool SDLInputSource::HandleControllerAxisEvent(const SDL_ControllerAxisEvent* ev)
