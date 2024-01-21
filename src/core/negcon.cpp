@@ -82,6 +82,12 @@ static float apply_axis_modifier(float value, const NeGcon::AxisModifier& axis_m
   return value;
 }
 
+static u8 get_scaled_value(float value, const NeGcon::AxisModifier& axis_modifier)
+{
+  value = axis_modifier.scaling * value + axis_modifier.zero;
+  return std::clamp(std::round(value), 0.0f, 255.0f);
+}
+
 void NeGcon::SetBindState(u32 index, float value)
 {
   // Steering Axis: -1..1 -> 0..255
@@ -93,9 +99,7 @@ void NeGcon::SetBindState(u32 index, float value)
     m_half_axis_state[index - static_cast<u32>(Button::Count)] = std::clamp(value, 0.0f, 1.0f);
 
     float merged = m_half_axis_state[1] - m_half_axis_state[0];
-    merged = 127.0f * merged + 128.0f;
-    merged = std::clamp(merged, 0.0f, 255.0f);
-    m_axis_state[static_cast<u32>(Axis::Steering)] = merged;
+    m_axis_state[static_cast<u32>(Axis::Steering)] = get_scaled_value(merged, m_steering_modifier);
   }
   else if (index >= static_cast<u32>(Button::Count))
   {
@@ -110,9 +114,12 @@ void NeGcon::SetBindState(u32 index, float value)
       const AxisModifier& axis_modifier =
         m_half_axis_modifiers[index - (static_cast<u32>(Button::Count) + static_cast<u32>(HalfAxis::I))];
       value = apply_axis_modifier(value, axis_modifier);
+      m_axis_state[sub_index] = get_scaled_value(value, axis_modifier);
     }
-
-    m_axis_state[sub_index] = static_cast<u8>(std::clamp(value * 255.0f, 0.0f, 255.0f));
+    else
+    {
+      m_axis_state[sub_index] = static_cast<u8>(std::clamp(value * 255.0f, 0.0f, 255.0f));
+    }
   }
   else if (index < static_cast<u32>(Button::Count))
   {
@@ -285,6 +292,12 @@ static const SettingInfo s_settings[] = {
   {SettingInfo::Type::Float, "SteeringLinearity", TRANSLATE_NOOP("NeGcon", "Steering Axis Linearity"),
    TRANSLATE_NOOP("NeGcon", "Sets linearity for steering axis."), "0.00f", "-2.00f", "2.00f", "0.05f", "%.2f",
    nullptr, 1.0f},
+  {SettingInfo::Type::Float, "SteeringZero", TRANSLATE_NOOP("NeGcon", "Steering Zero"),
+   TRANSLATE_NOOP("NeGcon", "Sets zero for steering axis."), "128.0f", "0.0f", "255.0f", "0.5f", "%.1f",
+   nullptr, 1.0f},
+  {SettingInfo::Type::Float, "SteeringScaling", TRANSLATE_NOOP("NeGcon", "Steering Scaling"),
+   TRANSLATE_NOOP("NeGcon", "Sets scaling for steering axis."), "127.0f", "-255.0f", "255.0f", "0.5f", "%.1f",
+   nullptr, 1.0f},
   {SettingInfo::Type::Float, "IDeadzone", TRANSLATE_NOOP("NeGcon", "I Button Deadzone"),
    TRANSLATE_NOOP("NeGcon", "Sets deadzone for button I."), "0.00f", "0.00f", "0.99f", "0.01f", "%.0f%%",
    nullptr, 100.0f},
@@ -293,6 +306,12 @@ static const SettingInfo s_settings[] = {
    nullptr, 100.0f},
   {SettingInfo::Type::Float, "ILinearity", TRANSLATE_NOOP("NeGcon", "I Button Linearity"),
    TRANSLATE_NOOP("NeGcon", "Sets linearity for button I."), "0.00f", "-2.00f", "2.00f", "0.01f", "%.2f",
+   nullptr, 1.0f},
+  {SettingInfo::Type::Float, "IZero", TRANSLATE_NOOP("NeGcon", "I Zero"),
+   TRANSLATE_NOOP("NeGcon", "Sets zero for button I."), "0.0f", "0.0f", "255.0f", "0.5f", "%.1f",
+   nullptr, 1.0f},
+  {SettingInfo::Type::Float, "IScaling", TRANSLATE_NOOP("NeGcon", "I Scaling"),
+   TRANSLATE_NOOP("NeGcon", "Sets scaling for button I."), "255.0f", "-255.0f", "255.0f", "0.5f", "%.1f",
    nullptr, 1.0f},
   {SettingInfo::Type::Float, "IIDeadzone", TRANSLATE_NOOP("NeGcon", "II Button Deadzone"),
    TRANSLATE_NOOP("NeGcon", "Sets deadzone for button II."), "0.00f", "0.00f", "0.99f", "0.01f", "%.0f%%",
@@ -303,6 +322,12 @@ static const SettingInfo s_settings[] = {
   {SettingInfo::Type::Float, "IILinearity", TRANSLATE_NOOP("NeGcon", "II Button Linearity"),
    TRANSLATE_NOOP("NeGcon", "Sets linearity for button II."), "0.00f", "-2.00f", "2.00f", "0.01f", "%.2f",
    nullptr, 1.0f},
+  {SettingInfo::Type::Float, "IIZero", TRANSLATE_NOOP("NeGcon", "II Zero"),
+   TRANSLATE_NOOP("NeGcon", "Sets zero for button II."), "0.0f", "0.0f", "255.0f", "0.5f", "%.1f",
+   nullptr, 1.0f},
+  {SettingInfo::Type::Float, "IIScaling", TRANSLATE_NOOP("NeGcon", "II Scaling"),
+   TRANSLATE_NOOP("NeGcon", "Sets scaling for button II."), "255.0f", "-255.0f", "255.0f", "0.5f", "%.1f",
+   nullptr, 1.0f},
   {SettingInfo::Type::Float, "LDeadzone", TRANSLATE_NOOP("NeGcon", "Left Trigger Deadzone"),
    TRANSLATE_NOOP("NeGcon", "Sets deadzone for left trigger."), "0.00f", "0.00f", "0.99f", "0.01f", "%.0f%%",
    nullptr, 100.0f},
@@ -311,6 +336,12 @@ static const SettingInfo s_settings[] = {
    nullptr, 100.0f},
   {SettingInfo::Type::Float, "LLinearity", TRANSLATE_NOOP("NeGcon", "Left Trigger Linearity"),
    TRANSLATE_NOOP("NeGcon", "Sets linearity for left trigger."), "0.00f", "-2.00f", "2.00f", "0.01f", "%.2f",
+   nullptr, 1.0f},
+  {SettingInfo::Type::Float, "LZero", TRANSLATE_NOOP("NeGcon", "Left Trigger Zero"),
+   TRANSLATE_NOOP("NeGcon", "Sets zero for button left trigger."), "0.0f", "0.0f", "255.0f", "0.5f", "%.1f",
+   nullptr, 1.0f},
+  {SettingInfo::Type::Float, "LScaling", TRANSLATE_NOOP("NeGcon", "Left Trigger Scaling"),
+   TRANSLATE_NOOP("NeGcon", "Sets scaling for button left trigger."), "255.0f", "-255.0f", "255.0f", "0.5f", "%.1f",
    nullptr, 1.0f},
 };
 
@@ -322,23 +353,31 @@ void NeGcon::LoadSettings(SettingsInterface& si, const char* section)
 {
   Controller::LoadSettings(si, section);
   m_steering_modifier = {
-    .deadzone = si.GetFloatValue(section, "SteeringDeadzone", DEFAULTAXISMODIFIER.deadzone),
-    .saturation = si.GetFloatValue(section, "SteeringSaturation", DEFAULTAXISMODIFIER.saturation),
-    .linearity = si.GetFloatValue(section, "SteeringLinearity", DEFAULTAXISMODIFIER.linearity),
+    .deadzone = si.GetFloatValue(section, "SteeringDeadzone", DEFAULT_STEERING_MODIFIER.deadzone),
+    .saturation = si.GetFloatValue(section, "SteeringSaturation", DEFAULT_STEERING_MODIFIER.saturation),
+    .linearity = si.GetFloatValue(section, "SteeringLinearity", DEFAULT_STEERING_MODIFIER.linearity),
+    .zero = si.GetFloatValue(section, "SteeringZero", DEFAULT_STEERING_MODIFIER.zero),
+    .scaling = si.GetFloatValue(section, "SteeringScaling", DEFAULT_STEERING_MODIFIER.scaling),
   };
   m_half_axis_modifiers[0] = {
-    .deadzone = si.GetFloatValue(section, "IDeadzone", DEFAULTAXISMODIFIER.deadzone),
-    .saturation = si.GetFloatValue(section, "ISaturation", DEFAULTAXISMODIFIER.saturation),
-    .linearity = si.GetFloatValue(section, "ILinearity", DEFAULTAXISMODIFIER.linearity),
+    .deadzone = si.GetFloatValue(section, "IDeadzone", DEFAULT_PEDAL_MODIFIER.deadzone),
+    .saturation = si.GetFloatValue(section, "ISaturation", DEFAULT_PEDAL_MODIFIER.saturation),
+    .linearity = si.GetFloatValue(section, "ILinearity", DEFAULT_PEDAL_MODIFIER.linearity),
+    .zero = si.GetFloatValue(section, "IZero", DEFAULT_PEDAL_MODIFIER.zero),
+    .scaling = si.GetFloatValue(section, "IScaling", DEFAULT_PEDAL_MODIFIER.scaling),
   };
   m_half_axis_modifiers[1] = {
-    .deadzone = si.GetFloatValue(section, "IIDeadzone", DEFAULTAXISMODIFIER.deadzone),
-    .saturation = si.GetFloatValue(section, "IISaturation", DEFAULTAXISMODIFIER.saturation),
-    .linearity = si.GetFloatValue(section, "IILinearity", DEFAULTAXISMODIFIER.linearity),
+    .deadzone = si.GetFloatValue(section, "IIDeadzone", DEFAULT_PEDAL_MODIFIER.deadzone),
+    .saturation = si.GetFloatValue(section, "IISaturation", DEFAULT_PEDAL_MODIFIER.saturation),
+    .linearity = si.GetFloatValue(section, "IILinearity", DEFAULT_PEDAL_MODIFIER.linearity),
+    .zero = si.GetFloatValue(section, "IIZero", DEFAULT_PEDAL_MODIFIER.zero),
+    .scaling = si.GetFloatValue(section, "IIScaling", DEFAULT_PEDAL_MODIFIER.scaling),
   };
   m_half_axis_modifiers[2] = {
-    .deadzone = si.GetFloatValue(section, "LDeadzone", DEFAULTAXISMODIFIER.deadzone),
-    .saturation = si.GetFloatValue(section, "LSaturation", DEFAULTAXISMODIFIER.saturation),
-    .linearity = si.GetFloatValue(section, "LLinearity", DEFAULTAXISMODIFIER.linearity),
+    .deadzone = si.GetFloatValue(section, "LDeadzone", DEFAULT_PEDAL_MODIFIER.deadzone),
+    .saturation = si.GetFloatValue(section, "LSaturation", DEFAULT_PEDAL_MODIFIER.saturation),
+    .linearity = si.GetFloatValue(section, "LLinearity", DEFAULT_PEDAL_MODIFIER.linearity),
+    .zero = si.GetFloatValue(section, "LZero", DEFAULT_PEDAL_MODIFIER.zero),
+    .scaling = si.GetFloatValue(section, "LScaling", DEFAULT_PEDAL_MODIFIER.scaling),
   };
 }

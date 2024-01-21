@@ -48,12 +48,30 @@ public:
     float deadzone;
     float saturation;
     float linearity;
+    float zero;
+    float scaling;
   };
 
-  static constexpr AxisModifier DEFAULTAXISMODIFIER = {
-    .deadzone = 0.00f,
-    .saturation = 1.00f,
-    .linearity = 0.00f,
+  static constexpr float DEFAULT_DEADZONE = 0.00f;
+  static constexpr float DEFAULT_SATURATION = 1.00f;
+  static constexpr float DEFAULT_LINEARITY = 0.00f;
+  static constexpr float DEFAULT_STEERING_ZERO = 128.0f;
+  static constexpr float DEFAULT_STEERING_SCALING = 127.0f;
+  static constexpr float DEFAULT_PEDAL_ZERO = 0.0f;
+  static constexpr float DEFAULT_PEDAL_SCALING = 255.0f;
+  static constexpr AxisModifier DEFAULT_STEERING_MODIFIER = {
+    .deadzone = DEFAULT_DEADZONE,
+    .saturation = DEFAULT_SATURATION,
+    .linearity = DEFAULT_LINEARITY,
+    .zero = DEFAULT_STEERING_ZERO,
+    .scaling = DEFAULT_STEERING_SCALING,
+  };
+  static constexpr AxisModifier DEFAULT_PEDAL_MODIFIER = {
+    .deadzone = DEFAULT_DEADZONE,
+    .saturation = DEFAULT_SATURATION,
+    .linearity = DEFAULT_LINEARITY,
+    .zero = DEFAULT_PEDAL_ZERO,
+    .scaling = DEFAULT_PEDAL_SCALING,
   };
 
   static const Controller::ControllerInfo INFO;
@@ -103,10 +121,10 @@ private:
 
   TransferState m_transfer_state = TransferState::Idle;
 
-  AxisModifier m_steering_modifier = DEFAULTAXISMODIFIER;
+  AxisModifier m_steering_modifier = DEFAULT_STEERING_MODIFIER;
   std::array<AxisModifier, 3> m_half_axis_modifiers = {
-    DEFAULTAXISMODIFIER,
-    DEFAULTAXISMODIFIER,
-    DEFAULTAXISMODIFIER,
+    DEFAULT_PEDAL_MODIFIER,
+    DEFAULT_PEDAL_MODIFIER,
+    DEFAULT_PEDAL_MODIFIER,
   };
 };
