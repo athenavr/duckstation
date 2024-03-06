@@ -51,12 +51,28 @@ bool NeGcon::DoState(StateWrapper& sw, bool apply_input_state)
   return true;
 }
 
+static auto get_scaled_value(auto value, const auto& axis_mapping)
+{
+  value = axis_mapping.unit * value + axis_mapping.zero;
+  return (u8)std::round(std::clamp(value, 0.0f, 255.0f));
+}
+static auto get_unscaled_value(const auto& u8, const auto& axis_mapping)
+{
+  return ((float)u8 - axis_mapping.zero) / axis_mapping.unit;
+}
+
 float NeGcon::GetBindState(u32 index) const
 {
   if (index == (static_cast<u32>(Button::Count) + static_cast<u32>(HalfAxis::SteeringLeft)) ||
       index == (static_cast<u32>(Button::Count) + static_cast<u32>(HalfAxis::SteeringRight)))
   {
-    return static_cast<float>(m_half_axis_state[index - static_cast<u32>(Button::Count)]) * (1.0f / 255.0f);
+    auto v = m_axis_state[static_cast<u32>(Axis::Steering)];
+    auto value = get_unscaled_value(v, m_steering_mapping);
+    if (index == (static_cast<u32>(Button::Count) + static_cast<u32>(HalfAxis::SteeringLeft)))
+    {
+      value *= -1.0f;
+    }
+    return std::max(0.0f, value);
   }
   else if (index >= static_cast<u32>(Button::Count))
   {
@@ -64,8 +80,7 @@ float NeGcon::GetBindState(u32 index) const
     const u32 sub_index = index - (static_cast<u32>(Button::Count) + 1);
     if (sub_index >= m_axis_state.size())
       return 0.0f;
-
-    return static_cast<float>(m_axis_state[sub_index]) * (1.0f / 255.0f);
+    return get_unscaled_value(m_axis_state[sub_index], m_pedals_mapping);
   }
   else
   {
@@ -74,23 +89,24 @@ float NeGcon::GetBindState(u32 index) const
   }
 }
 
+static float apply_axis_modifier(auto value, const auto& axis_modifier)
+{
+  value = (value - axis_modifier.deadzone) / (axis_modifier.saturation - axis_modifier.deadzone);
+  value = std::clamp(value, 0.0f, 1.0f);
+  value = std::pow(value, std::exp(axis_modifier.linearity));
+  return value;
+}
+
 void NeGcon::SetBindState(u32 index, float value)
 {
   // Steering Axis: -1..1 -> 0..255
   if (index == (static_cast<u32>(Button::Count) + static_cast<u32>(HalfAxis::SteeringLeft)) ||
       index == (static_cast<u32>(Button::Count) + static_cast<u32>(HalfAxis::SteeringRight)))
   {
-    value *= m_steering_sensitivity;
-    if (value < m_steering_deadzone)
-      value = 0.0f;
-
-    m_half_axis_state[index - static_cast<u32>(Button::Count)] =
-      static_cast<u8>(std::clamp(value * 255.0f, 0.0f, 255.0f));
-
-    // Merge left/right. Seems to be inverted.
-    m_axis_state[static_cast<u32>(Axis::Steering)] =
-      ((m_half_axis_state[1] != 0) ? (127u + ((m_half_axis_state[1] + 1u) / 2u)) :
-                                     (127u - (m_half_axis_state[0] / 2u)));
+    value = apply_axis_modifier(value, m_steering_modifier);
+    m_half_axis_state[index - static_cast<u32>(Button::Count)] = value;
+    float merged = m_half_axis_state[1] - m_half_axis_state[0];
+    m_axis_state[static_cast<u32>(Axis::Steering)] = get_scaled_value(merged, m_steering_mapping);
   }
   else if (index >= static_cast<u32>(Button::Count))
   {
@@ -99,7 +115,18 @@ void NeGcon::SetBindState(u32 index, float value)
     if (sub_index >= m_axis_state.size())
       return;
 
-    m_axis_state[sub_index] = static_cast<u8>(std::clamp(value * 255.0f, 0.0f, 255.0f));
+    if (index >= (static_cast<u32>(Button::Count) + static_cast<u32>(HalfAxis::I)) &&
+        index <= (static_cast<u32>(Button::Count) + static_cast<u32>(HalfAxis::L)))
+    {
+      const auto& axis_modifier =
+        m_pedal_modifiers[index - (static_cast<u32>(Button::Count) + static_cast<u32>(HalfAxis::I))];
+      value = apply_axis_modifier(value, axis_modifier);
+      m_axis_state[sub_index] = get_scaled_value(value, m_pedals_mapping);
+    }
+    else
+    {
+      m_axis_state[sub_index] = static_cast<u8>(std::clamp(value * 255.0f, 0.0f, 255.0f));
+    }
   }
   else if (index < static_cast<u32>(Button::Count))
   {
@@ -269,6 +296,44 @@ static const SettingInfo s_settings[] = {
   {SettingInfo::Type::Float, "SteeringSensitivity", TRANSLATE_NOOP("NeGcon", "Steering Axis Sensitivity"),
    TRANSLATE_NOOP("NeGcon", "Sets the steering axis scaling factor."), "1.00f", "0.01f", "2.00f", "0.01f", "%.0f%%",
    nullptr, 100.0f},
+  {SettingInfo::Type::Float, "SteeringLinearity", TRANSLATE_NOOP("NeGcon", "Steering Axis Linearity"),
+   TRANSLATE_NOOP("NeGcon", "Sets linearity for steering axis."), "0.00f", "-2.00f", "2.00f", "0.05f", "%.2f", nullptr,
+   1.0f},
+  {SettingInfo::Type::Float, "IDeadzone", TRANSLATE_NOOP("NeGcon", "I Button Deadzone"),
+   TRANSLATE_NOOP("NeGcon", "Sets deadzone for button I."), "0.00f", "0.00f", "0.99f", "0.01f", "%.0f%%", nullptr,
+   100.0f},
+  {SettingInfo::Type::Float, "ISaturation", TRANSLATE_NOOP("NeGcon", "I Button Saturation"),
+   TRANSLATE_NOOP("NeGcon", "Sets saturation for button I."), "1.00f", "0.01f", "1.00f", "0.01f", "%.0f%%", nullptr,
+   100.0f},
+  {SettingInfo::Type::Float, "ILinearity", TRANSLATE_NOOP("NeGcon", "I Button Linearity"),
+   TRANSLATE_NOOP("NeGcon", "Sets linearity for button I."), "0.00f", "-2.00f", "2.00f", "0.01f", "%.2f", nullptr,
+   1.0f},
+  {SettingInfo::Type::Float, "IIDeadzone", TRANSLATE_NOOP("NeGcon", "II Button Deadzone"),
+   TRANSLATE_NOOP("NeGcon", "Sets deadzone for button II."), "0.00f", "0.00f", "0.99f", "0.01f", "%.0f%%", nullptr,
+   100.0f},
+  {SettingInfo::Type::Float, "IISaturation", TRANSLATE_NOOP("NeGcon", "II Button Saturation"),
+   TRANSLATE_NOOP("NeGcon", "Sets saturation for button II."), "1.00f", "0.01f", "1.00f", "0.01f", "%.0f%%", nullptr,
+   100.0f},
+  {SettingInfo::Type::Float, "IILinearity", TRANSLATE_NOOP("NeGcon", "II Button Linearity"),
+   TRANSLATE_NOOP("NeGcon", "Sets linearity for button II."), "0.00f", "-2.00f", "2.00f", "0.01f", "%.2f", nullptr,
+   1.0f},
+  {SettingInfo::Type::Float, "LDeadzone", TRANSLATE_NOOP("NeGcon", "Left Trigger Deadzone"),
+   TRANSLATE_NOOP("NeGcon", "Sets deadzone for left trigger."), "0.00f", "0.00f", "0.99f", "0.01f", "%.0f%%", nullptr,
+   100.0f},
+  {SettingInfo::Type::Float, "LSaturation", TRANSLATE_NOOP("NeGcon", "Left Trigger Saturation"),
+   TRANSLATE_NOOP("NeGcon", "Sets saturation for left trigger."), "1.00f", "0.01f", "1.00f", "0.01f", "%.0f%%", nullptr,
+   100.0f},
+  {SettingInfo::Type::Float, "LLinearity", TRANSLATE_NOOP("NeGcon", "Left Trigger Linearity"),
+   TRANSLATE_NOOP("NeGcon", "Sets linearity for left trigger."), "0.00f", "-2.00f", "2.00f", "0.01f", "%.2f", nullptr,
+   1.0f},
+  {SettingInfo::Type::Float, "SteeringZero", TRANSLATE_NOOP("NeGcon", "Steering Zero"),
+   TRANSLATE_NOOP("NeGcon", "Sets zero for steering axis."), "128.0f", "0.0f", "255.0f", "0.5f", "%.1f", nullptr, 1.0f},
+  {SettingInfo::Type::Float, "SteeringUnit", TRANSLATE_NOOP("NeGcon", "Steering Unit"),
+   TRANSLATE_NOOP("NeGcon", "Sets unit for steering axis."), "127.0f", "0.0f", "255.0f", "0.5f", "%.1f", nullptr, 1.0f},
+  {SettingInfo::Type::Float, "PedalsZero", TRANSLATE_NOOP("NeGcon", "Pedals Zero"),
+   TRANSLATE_NOOP("NeGcon", "Sets zero for pedals."), "0.0f", "0.0f", "255.0f", "0.5f", "%.1f", nullptr, 1.0f},
+  {SettingInfo::Type::Float, "PedalsUnit", TRANSLATE_NOOP("NeGcon", "Pedals Unit"),
+   TRANSLATE_NOOP("NeGcon", "Sets unit for pedals."), "255.0f", "0.0f", "255.0f", "0.5f", "%.1f", nullptr, 1.0f},
 };
 
 const Controller::ControllerInfo NeGcon::INFO = {
@@ -278,6 +343,32 @@ const Controller::ControllerInfo NeGcon::INFO = {
 void NeGcon::LoadSettings(SettingsInterface& si, const char* section)
 {
   Controller::LoadSettings(si, section);
-  m_steering_deadzone = si.GetFloatValue(section, "SteeringDeadzone", 0.10f);
-  m_steering_sensitivity = si.GetFloatValue(section, "SteeringSensitivity", 1.00f);
+  m_steering_modifier = {
+    .deadzone = si.GetFloatValue(section, "SteeringDeadzone", DEFAULT_AXIS_MODIFIER.deadzone),
+    .saturation = si.GetFloatValue(section, "SteeringSaturation", DEFAULT_AXIS_MODIFIER.saturation),
+    .linearity = si.GetFloatValue(section, "SteeringLinearity", DEFAULT_AXIS_MODIFIER.linearity),
+  };
+  m_pedal_modifiers[0] = {
+    .deadzone = si.GetFloatValue(section, "IDeadzone", DEFAULT_AXIS_MODIFIER.deadzone),
+    .saturation = si.GetFloatValue(section, "ISaturation", DEFAULT_AXIS_MODIFIER.saturation),
+    .linearity = si.GetFloatValue(section, "ILinearity", DEFAULT_AXIS_MODIFIER.linearity),
+  };
+  m_pedal_modifiers[1] = {
+    .deadzone = si.GetFloatValue(section, "IIDeadzone", DEFAULT_AXIS_MODIFIER.deadzone),
+    .saturation = si.GetFloatValue(section, "IISaturation", DEFAULT_AXIS_MODIFIER.saturation),
+    .linearity = si.GetFloatValue(section, "IILinearity", DEFAULT_AXIS_MODIFIER.linearity),
+  };
+  m_pedal_modifiers[2] = {
+    .deadzone = si.GetFloatValue(section, "LDeadzone", DEFAULT_AXIS_MODIFIER.deadzone),
+    .saturation = si.GetFloatValue(section, "LSaturation", DEFAULT_AXIS_MODIFIER.saturation),
+    .linearity = si.GetFloatValue(section, "LLinearity", DEFAULT_AXIS_MODIFIER.linearity),
+  };
+  m_steering_mapping = {
+    .zero = si.GetFloatValue(section, "SteeringZero", DEFAULT_STEERING_MAPPING.zero),
+    .unit = si.GetFloatValue(section, "SteeringUnit", DEFAULT_STEERING_MAPPING.unit),
+  };
+  m_pedals_mapping = {
+    .zero = si.GetFloatValue(section, "PedalsZero", DEFAULT_PEDALS_MAPPING.zero),
+    .unit = si.GetFloatValue(section, "PedalsUnit", DEFAULT_PEDALS_MAPPING.unit),
+  };
 }

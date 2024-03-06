@@ -43,6 +43,26 @@ public:
     Count
   };
 
+  struct AxisModifier
+  {
+    float deadzone;
+    float saturation;
+    float linearity;
+  };
+  struct AxisMapping
+  {
+    float zero;
+    float unit;
+  };
+
+  static constexpr AxisModifier DEFAULT_AXIS_MODIFIER = {
+    .deadzone = 0.00f,
+    .saturation = 1.00f,
+    .linearity = 0.00f,
+  };
+  static constexpr AxisMapping DEFAULT_STEERING_MAPPING = {.zero = 128.0f, .unit = 127.0f};
+  static constexpr AxisMapping DEFAULT_PEDALS_MAPPING = {.zero = 0.0f, .unit = 255.0f};
+
   static const Controller::ControllerInfo INFO;
 
   NeGcon(u32 index);
@@ -83,13 +103,19 @@ private:
   std::array<u8, static_cast<u8>(Axis::Count)> m_axis_state{};
 
   // steering, merged to m_axis_state
-  std::array<u8, 2> m_half_axis_state{};
+  std::array<float, 2> m_half_axis_state{};
 
   // buttons are active low; bits 0-2, 8-10, 14-15 are not used and are always high
   u16 m_button_state = UINT16_C(0xFFFF);
 
   TransferState m_transfer_state = TransferState::Idle;
 
-  float m_steering_deadzone = 0.00f;
-  float m_steering_sensitivity = 1.00f;
+  AxisModifier m_steering_modifier = DEFAULT_AXIS_MODIFIER;
+  std::array<AxisModifier, 3> m_pedal_modifiers = {
+    DEFAULT_AXIS_MODIFIER,
+    DEFAULT_AXIS_MODIFIER,
+    DEFAULT_AXIS_MODIFIER,
+  };
+  AxisMapping m_steering_mapping = DEFAULT_STEERING_MAPPING;
+  AxisMapping m_pedals_mapping = DEFAULT_PEDALS_MAPPING;
 };

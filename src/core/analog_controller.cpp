@@ -3,6 +3,7 @@
 
 #include "analog_controller.h"
 #include "host.h"
+#include "meta.h"
 #include "settings.h"
 #include "system.h"
 
@@ -128,11 +129,17 @@ float AnalogController::GetBindState(u32 index) const
 {
   if (index >= static_cast<u32>(Button::Count))
   {
-    const u32 sub_index = index - static_cast<u32>(Button::Count);
-    if (sub_index >= static_cast<u32>(m_half_axis_state.size()))
+    auto hi = index - to_unsigned(Button::Count);
+    // todo: that test shouldn't be here, there is something wrong somewhere
+    if (hi >= to_unsigned(HalfAxis::Count))
       return 0.0f;
-
-    return static_cast<float>(m_half_axis_state[sub_index]) * (1.0f / 255.0f);
+    auto ai = hi / 2u;
+    auto value = (m_axis_state[ai] - m_axis_zero) / m_axis_unit;
+    if (hi % 2u == 0u)
+    {
+      value *= -1.0f;
+    }
+    return std::max(0.0f, value);
   }
   else if (index < static_cast<u32>(Button::Analog))
   {
@@ -142,6 +149,14 @@ float AnalogController::GetBindState(u32 index) const
   {
     return 0.0f;
   }
+}
+
+static auto apply_axis_modifiers(auto value, const auto& axis_modifier)
+{
+  value = (value - axis_modifier.deadzone) / (axis_modifier.saturation - axis_modifier.deadzone);
+  value = std::clamp(value, 0.0f, 1.0f);
+  value = std::pow(value, std::exp(axis_modifier.linearity));
+  return value;
 }
 
 void AnalogController::SetBindState(u32 index, float value)
@@ -159,93 +174,25 @@ void AnalogController::SetBindState(u32 index, float value)
 
     return;
   }
-  else if (index >= static_cast<u32>(Button::Count))
+  else if (index >= to_unsigned(Button::Count))
   {
-    const u32 sub_index = index - static_cast<u32>(Button::Count);
-    if (sub_index >= static_cast<u32>(m_half_axis_state.size()))
+    auto hi = index - to_unsigned(Button::Count);
+    // todo: that test shouldn't be here, there is something wrong somewhere
+    if (hi >= to_unsigned(HalfAxis::Count))
       return;
-
-    const u8 u8_value = static_cast<u8>(std::clamp(value * m_analog_sensitivity * 255.0f, 0.0f, 255.0f));
-    if (u8_value == m_half_axis_state[sub_index])
-      return;
-
-    m_half_axis_state[sub_index] = u8_value;
-    System::SetRunaheadReplayFlag();
-
-#define MERGE(pos, neg)                                                                                                \
-  ((m_half_axis_state[static_cast<u32>(pos)] != 0) ? (127u + ((m_half_axis_state[static_cast<u32>(pos)] + 1u) / 2u)) : \
-                                                     (127u - (m_half_axis_state[static_cast<u32>(neg)] / 2u)))
-    switch (static_cast<HalfAxis>(sub_index))
+    auto ai = hi / 2u;
+    value = apply_axis_modifiers(value, m_axis_modifiers[ai]);
+    m_half_axis_state[hi] = value;
+    value = m_half_axis_state[2U * ai + 1U] - m_half_axis_state[2U * ai];
+    value = m_axis_unit * value + m_axis_zero;
+    value = std::round(value);
+    value = std::clamp(value, 0.0f, 255.0f);
+    auto na = (uint8_t)value;
+    if (na != m_axis_state[ai])
     {
-      case HalfAxis::LLeft:
-      case HalfAxis::LRight:
-        m_axis_state[static_cast<u8>(Axis::LeftX)] = ((m_invert_left_stick & 1u) != 0u) ?
-                                                       MERGE(HalfAxis::LLeft, HalfAxis::LRight) :
-                                                       MERGE(HalfAxis::LRight, HalfAxis::LLeft);
-        break;
-
-      case HalfAxis::LDown:
-      case HalfAxis::LUp:
-        m_axis_state[static_cast<u8>(Axis::LeftY)] = ((m_invert_left_stick & 2u) != 0u) ?
-                                                       MERGE(HalfAxis::LUp, HalfAxis::LDown) :
-                                                       MERGE(HalfAxis::LDown, HalfAxis::LUp);
-        break;
-
-      case HalfAxis::RLeft:
-      case HalfAxis::RRight:
-        m_axis_state[static_cast<u8>(Axis::RightX)] = ((m_invert_right_stick & 1u) != 0u) ?
-                                                        MERGE(HalfAxis::RLeft, HalfAxis::RRight) :
-                                                        MERGE(HalfAxis::RRight, HalfAxis::RLeft);
-        break;
-
-      case HalfAxis::RDown:
-      case HalfAxis::RUp:
-        m_axis_state[static_cast<u8>(Axis::RightY)] = ((m_invert_right_stick & 2u) != 0u) ?
-                                                        MERGE(HalfAxis::RUp, HalfAxis::RDown) :
-                                                        MERGE(HalfAxis::RDown, HalfAxis::RUp);
-        break;
-
-      default:
-        break;
+      m_axis_state[ai] = na;
+      System::SetRunaheadReplayFlag();
     }
-
-    if (m_analog_deadzone > 0.0f)
-    {
-#define MERGE_F(pos, neg)                                                                                              \
-  ((m_half_axis_state[static_cast<u32>(pos)] != 0) ?                                                                   \
-     (static_cast<float>(m_half_axis_state[static_cast<u32>(pos)]) / 255.0f) :                                         \
-     (static_cast<float>(m_half_axis_state[static_cast<u32>(neg)]) / -255.0f))
-
-      float pos_x, pos_y;
-      if (static_cast<HalfAxis>(sub_index) < HalfAxis::RLeft)
-      {
-        pos_x = ((m_invert_left_stick & 1u) != 0u) ? MERGE_F(HalfAxis::LLeft, HalfAxis::LRight) :
-                                                     MERGE_F(HalfAxis::LRight, HalfAxis::LLeft);
-        pos_y = ((m_invert_left_stick & 2u) != 0u) ? MERGE_F(HalfAxis::LUp, HalfAxis::LDown) :
-                                                     MERGE_F(HalfAxis::LDown, HalfAxis::LUp);
-      }
-      else
-      {
-        pos_x = ((m_invert_right_stick & 1u) != 0u) ? MERGE_F(HalfAxis::RLeft, HalfAxis::RRight) :
-                                                      MERGE_F(HalfAxis::RRight, HalfAxis::RLeft);
-        ;
-        pos_y = ((m_invert_right_stick & 2u) != 0u) ? MERGE_F(HalfAxis::RUp, HalfAxis::RDown) :
-                                                      MERGE_F(HalfAxis::RDown, HalfAxis::RUp);
-      }
-
-      if (InCircularDeadzone(m_analog_deadzone, pos_x, pos_y))
-      {
-        // Set to 127 (center).
-        if (static_cast<HalfAxis>(sub_index) < HalfAxis::RLeft)
-          m_axis_state[static_cast<u8>(Axis::LeftX)] = m_axis_state[static_cast<u8>(Axis::LeftY)] = 127;
-        else
-          m_axis_state[static_cast<u8>(Axis::RightX)] = m_axis_state[static_cast<u8>(Axis::RightY)] = 127;
-      }
-#undef MERGE_F
-    }
-
-#undef MERGE
-
     return;
   }
 
@@ -847,16 +794,62 @@ static const SettingInfo s_settings[] = {
    TRANSLATE_NOOP("AnalogController",
                   "Allows you to use the analog sticks to control the d-pad in digital mode, as well as the buttons."),
    "true", nullptr, nullptr, nullptr, nullptr, nullptr, 0.0f},
-  {SettingInfo::Type::Float, "AnalogDeadzone", TRANSLATE_NOOP("AnalogController", "Analog Deadzone"),
+
+  {SettingInfo::Type::Float, "LXDeadzone", TRANSLATE_NOOP("AnalogController", "Left Stick X Deadzone"),
    TRANSLATE_NOOP("AnalogController",
-                  "Sets the analog stick deadzone, i.e. the fraction of the stick movement which will be ignored."),
+                  "Sets the left stick X deadzone, i.e. the fraction of the stick movement which will be ignored."),
    "0.00f", "0.00f", "1.00f", "0.01f", "%.0f%%", nullptr, 100.0f},
-  {SettingInfo::Type::Float, "AnalogSensitivity", TRANSLATE_NOOP("AnalogController", "Analog Sensitivity"),
-   TRANSLATE_NOOP(
-     "AnalogController",
-     "Sets the analog stick axis scaling factor. A value between 130% and 140% is recommended when using recent "
-     "controllers, e.g. DualShock 4, Xbox One Controller."),
-   "1.33f", "0.01f", "2.00f", "0.01f", "%.0f%%", nullptr, 100.0f},
+  {SettingInfo::Type::Float, "LXSaturation", TRANSLATE_NOOP("AnalogController", "Left Stick X Saturation"),
+   TRANSLATE_NOOP("AnalogController",
+                  "Sets the left stick X saturation, i.e. the fraction of the stick movement which will be ignored."),
+   "1.00f", "0.00f", "1.00f", "0.01f", "%.0f%%", nullptr, 100.0f},
+  {SettingInfo::Type::Float, "LXLinearity", TRANSLATE_NOOP("AnalogController", "Left Stick X Linearity"),
+   TRANSLATE_NOOP("AnalogController", "Sets the left stick X linearity."), "0.00f", "-2.00f", "2.00f", "0.05f", "%.2f",
+   nullptr, 1.0f},
+
+  {SettingInfo::Type::Float, "LYDeadzone", TRANSLATE_NOOP("AnalogController", "Left Stick Y Deadzone"),
+   TRANSLATE_NOOP("AnalogController",
+                  "Sets the left stick Y deadzone, i.e. the fraction of the stick movement which will be ignored."),
+   "0.00f", "0.00f", "1.00f", "0.01f", "%.0f%%", nullptr, 100.0f},
+  {SettingInfo::Type::Float, "LYSaturation", TRANSLATE_NOOP("AnalogController", "Left Stick Y Saturation"),
+   TRANSLATE_NOOP("AnalogController",
+                  "Sets the left stick Y saturation, i.e. the fraction of the stick movement which will be ignored."),
+   "1.00f", "0.00f", "1.00f", "0.01f", "%.0f%%", nullptr, 100.0f},
+  {SettingInfo::Type::Float, "LYLinearity", TRANSLATE_NOOP("AnalogController", "Left Stick Y Linearity"),
+   TRANSLATE_NOOP("AnalogController", "Sets the left stick Y linearity."), "0.00f", "-2.00f", "2.00f", "0.05f", "%.2f",
+   nullptr, 1.0f},
+
+  {SettingInfo::Type::Float, "RXDeadzone", TRANSLATE_NOOP("AnalogController", "Right Stick X Deadzone"),
+   TRANSLATE_NOOP("AnalogController",
+                  "Sets the right stick X deadzone, i.e. the fraction of the stick movement which will be ignored."),
+   "0.00f", "0.00f", "1.00f", "0.01f", "%.0f%%", nullptr, 100.0f},
+  {SettingInfo::Type::Float, "RXSaturation", TRANSLATE_NOOP("AnalogController", "Right Stick X Saturation"),
+   TRANSLATE_NOOP("AnalogController",
+                  "Sets the right stick X saturation, i.e. the fraction of the stick movement which will be ignored."),
+   "1.00f", "0.00f", "1.00f", "0.01f", "%.0f%%", nullptr, 100.0f},
+  {SettingInfo::Type::Float, "RXLinearity", TRANSLATE_NOOP("AnalogController", "Right Stick X Linearity"),
+   TRANSLATE_NOOP("AnalogController", "Sets the right stick X linearity."), "0.00f", "-2.00f", "2.00f", "0.05f", "%.2f",
+   nullptr, 1.0f},
+
+  {SettingInfo::Type::Float, "RYDeadzone", TRANSLATE_NOOP("AnalogController", "Right Stick Y Deadzone"),
+   TRANSLATE_NOOP("AnalogController",
+                  "Sets the right stick Y deadzone, i.e. the fraction of the stick movement which will be ignored."),
+   "0.00f", "0.00f", "1.00f", "0.01f", "%.0f%%", nullptr, 100.0f},
+  {SettingInfo::Type::Float, "RYSaturation", TRANSLATE_NOOP("AnalogController", "Right Stick Y Saturation"),
+   TRANSLATE_NOOP("AnalogController",
+                  "Sets the right stick Y saturation, i.e. the fraction of the stick movement which will be ignored."),
+   "1.00f", "0.00f", "1.00f", "0.01f", "%.0f%%", nullptr, 100.0f},
+  {SettingInfo::Type::Float, "RYLinearity", TRANSLATE_NOOP("AnalogController", "Right Stick Y Linearity"),
+   TRANSLATE_NOOP("AnalogController", "Sets the right stick Y linearity."), "0.00f", "-2.00f", "2.00f", "0.05f", "%.2f",
+   nullptr, 1.0f},
+
+  {SettingInfo::Type::Float, "AxisZero", TRANSLATE_NOOP("AnalogController", "Zero axis value"),
+   TRANSLATE_NOOP("AnalogController", "Sets the zero value"), "128.0f", "0.0f", "255.0ff", "0.5f", "%.1f", nullptr,
+   1.0f},
+  {SettingInfo::Type::Float, "AxisUnit", TRANSLATE_NOOP("AnalogController", "Unit axis value"),
+   TRANSLATE_NOOP("AnalogController", "Sets the unit value"), "127.0f", "0.0f", "255.0ff", "0.5f", "%.1f", nullptr,
+   1.0f},
+
   {SettingInfo::Type::Float, "ButtonDeadzone", TRANSLATE_NOOP("AnalogController", "Button/Trigger Deadzone"),
    TRANSLATE_NOOP("AnalogController", "Sets the deadzone for activating buttons/triggers, "
                                       "i.e. the fraction of the trigger which will be ignored."),
@@ -886,9 +879,29 @@ void AnalogController::LoadSettings(SettingsInterface& si, const char* section)
   Controller::LoadSettings(si, section);
   m_force_analog_on_reset = si.GetBoolValue(section, "ForceAnalogOnReset", true);
   m_analog_dpad_in_digital_mode = si.GetBoolValue(section, "AnalogDPadInDigitalMode", true);
-  m_analog_deadzone = std::clamp(si.GetFloatValue(section, "AnalogDeadzone", DEFAULT_STICK_DEADZONE), 0.0f, 1.0f);
-  m_analog_sensitivity =
-    std::clamp(si.GetFloatValue(section, "AnalogSensitivity", DEFAULT_STICK_SENSITIVITY), 0.01f, 3.0f);
+  m_axis_modifiers[0] = {
+    .deadzone = si.GetFloatValue(section, "LXDeadzone", DEFAULT_STICK_MODIFIER.deadzone),
+    .saturation = si.GetFloatValue(section, "LXSaturation", DEFAULT_STICK_MODIFIER.saturation),
+    .linearity = si.GetFloatValue(section, "LXLinearity", DEFAULT_STICK_MODIFIER.linearity),
+  };
+  m_axis_modifiers[1] = {
+    .deadzone = si.GetFloatValue(section, "LYDeadzone", DEFAULT_STICK_MODIFIER.deadzone),
+    .saturation = si.GetFloatValue(section, "LYSaturation", DEFAULT_STICK_MODIFIER.saturation),
+    .linearity = si.GetFloatValue(section, "LYLinearity", DEFAULT_STICK_MODIFIER.linearity),
+  };
+  m_axis_modifiers[2] = {
+    .deadzone = si.GetFloatValue(section, "RXDeadzone", DEFAULT_STICK_MODIFIER.deadzone),
+    .saturation = si.GetFloatValue(section, "RXSaturation", DEFAULT_STICK_MODIFIER.saturation),
+    .linearity = si.GetFloatValue(section, "RXLinearity", DEFAULT_STICK_MODIFIER.linearity),
+  };
+  m_axis_modifiers[3] = {
+    .deadzone = si.GetFloatValue(section, "RYDeadzone", DEFAULT_STICK_MODIFIER.deadzone),
+    .saturation = si.GetFloatValue(section, "RYSaturation", DEFAULT_STICK_MODIFIER.saturation),
+    .linearity = si.GetFloatValue(section, "RYLinearity", DEFAULT_STICK_MODIFIER.linearity),
+  };
+  m_axis_zero = si.GetFloatValue(section, "AxisZero", DEFAULT_AXIS_ZERO),
+  m_axis_unit = si.GetFloatValue(section, "AxisUnit", DEFAULT_AXIS_UNIT),
+
   m_button_deadzone = std::clamp(si.GetFloatValue(section, "ButtonDeadzone", DEFAULT_BUTTON_DEADZONE), 0.01f, 1.0f);
   m_rumble_bias = static_cast<u8>(std::min<u32>(si.GetIntValue(section, "VibrationBias", 8), 255));
   m_invert_left_stick = static_cast<u8>(si.GetIntValue(section, "InvertLeftStick", 0));

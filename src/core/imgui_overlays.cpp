@@ -630,10 +630,8 @@ void ImGuiManager::DrawInputsOverlay()
         {
           // axes are always shown
           const float value = controller->GetBindState(bi.bind_index);
-          if (value >= (254.0f / 255.0f))
-            text.append_format(" {}", bi.icon_name ? bi.icon_name : bi.name);
-          else if (value > (1.0f / 255.0f))
-            text.append_format(" {}: {:.2f}", bi.icon_name ? bi.icon_name : bi.name, value);
+          if (value != 0.0f)
+            text.append_format(" {}: {:.3f}", bi.icon_name ? bi.icon_name : bi.name, value);
         }
         break;
 

@@ -46,14 +46,25 @@ public:
   {
     LLeft,
     LRight,
-    LDown,
     LUp,
+    LDown,
     RLeft,
     RRight,
-    RDown,
     RUp,
+    RDown,
     Count
   };
+
+  struct StickModifier
+  {
+    float deadzone;
+    float saturation;
+    float linearity;
+  };
+
+  static constexpr StickModifier DEFAULT_STICK_MODIFIER = {.deadzone = 0.00f, .saturation = 1.00f, .linearity = 0.00f};
+  static constexpr float DEFAULT_AXIS_ZERO = 128.0f;
+  static constexpr float DEFAULT_AXIS_UNIT = 127.0f;
 
   static constexpr u8 NUM_MOTORS = 2;
 
@@ -122,8 +133,6 @@ private:
 
   bool m_force_analog_on_reset = false;
   bool m_analog_dpad_in_digital_mode = false;
-  float m_analog_deadzone = 0.0f;
-  float m_analog_sensitivity = 1.33f;
   float m_button_deadzone = 0.0f;
   u8 m_rumble_bias = 8;
   u8 m_invert_left_stick = 0;
@@ -134,7 +143,11 @@ private:
   bool m_dualshock_enabled = false;
   bool m_configuration_mode = false;
 
-  std::array<u8, static_cast<u8>(Axis::Count)> m_axis_state{};
+  std::array<u8, static_cast<u8>(Axis::Count)> m_axis_state;
+  std::array<StickModifier, 4u> m_axis_modifiers = {DEFAULT_STICK_MODIFIER, DEFAULT_STICK_MODIFIER,
+                                                    DEFAULT_STICK_MODIFIER, DEFAULT_STICK_MODIFIER};
+  float m_axis_zero = DEFAULT_AXIS_ZERO;
+  float m_axis_unit = DEFAULT_AXIS_UNIT;
 
   enum : u8
   {
@@ -158,7 +171,7 @@ private:
   MotorState m_motor_state{};
 
   // both directions of axis state, merged to m_axis_state
-  std::array<u8, static_cast<u32>(HalfAxis::Count)> m_half_axis_state{};
+  std::array<float, static_cast<u32>(HalfAxis::Count)> m_half_axis_state{};
 
   // Member variables that are no longer used, but kept and serialized for compatibility with older save states
   u8 m_command_param = 0;

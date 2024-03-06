@@ -79,6 +79,8 @@ add_library(core
   memory_card.h
   memory_card_image.cpp
   memory_card_image.h
+  meta.cpp
+  meta.h
   multitap.cpp
   multitap.h
   negcon.cpp
